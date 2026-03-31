@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:smart_attendance/models/session_model.dart';
 import 'package:smart_attendance/theme/app_theme.dart';
+import 'package:smart_attendance/services/location_service.dart';
+import 'package:smart_attendance/services/database_service.dart';
+import 'package:smart_attendance/services/sync_service.dart';
+import 'package:uuid/uuid.dart';
 
 class QrScanScreen extends StatefulWidget {
   const QrScanScreen({super.key});
@@ -33,8 +37,42 @@ class _QrScanScreenState extends State<QrScanScreen> {
         return;
       }
 
-      // PHASE 3: Here we will integrate GPS logic and SQLite capture.
-      // For now, assume success.
+      // Check GPS
+      bool isWithinDomain = false;
+      try {
+        isWithinDomain = await LocationService.isWithinRange(
+          session.latitude, 
+          session.longitude, 
+          allowedRadiusMeters: 200.0, // generous 200m radius
+        );
+      } catch (e) {
+         _showResult("Location Error", e.toString(), false);
+         return;
+      }
+
+      if (!isWithinDomain) {
+         _showResult(
+          "Out of Bounds", 
+          "You are too far from the session's designated location.", 
+          false,
+        );
+        return;
+      }
+
+      // Record offline attendance
+      final db = DatabaseService();
+      await db.insertRecord(
+        AttendanceRecord(
+          sessionId: session.sessionId,
+          subject: session.subject,
+          studentId: const Uuid().v4(), // Mocked student ID since we don't have login
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+
+      // Trigger background sync conditionally
+      SyncService().syncPendingRecords();
+
       _showResult(
         "Attendance Marked",
         "Successfully recorded attendance for ${session.subject}.",
